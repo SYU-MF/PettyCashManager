@@ -64,7 +64,7 @@ export default function Dashboard({ transactions, categories, summary, recentTra
     const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
     const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
     
-    const { data: transactionData, setData: setTransactionData, post: postTransaction, put: putTransaction, processing: transactionProcessing, errors: transactionErrors, reset: resetTransaction } = useForm({
+    const { data: transactionData, setData: setTransactionData, post: postTransaction, put: putTransaction, processing: transactionProcessing, errors: transactionErrors, reset: resetTransaction, clearErrors } = useForm({
         amount: '',
         description: '',
         used_by: '',
@@ -100,19 +100,58 @@ export default function Dashboard({ transactions, categories, summary, recentTra
     
     const confirmTransactionAction = () => {
         if (pendingTransactionAction === 'add') {
-            postTransaction('/transactions', {
+            // Debug: Log the form data being sent
+            console.log('Submitting transaction data:', transactionData);
+            
+            // Create FormData manually to ensure proper serialization
+            const formData = new FormData();
+            formData.append('amount', transactionData.amount);
+            formData.append('description', transactionData.description);
+            formData.append('used_by', transactionData.used_by);
+            formData.append('category_id', transactionData.category_id);
+            formData.append('transaction_type', transactionData.transaction_type);
+            formData.append('date', transactionData.date);
+            if (transactionData.receipt) {
+                formData.append('receipt', transactionData.receipt);
+            }
+            
+            router.post('/transactions', formData, {
                 onSuccess: () => {
                     setShowTransactionConfirmModal(false);
                     setShowTransactionSuccessModal(true);
                     setPendingTransactionAction(null);
                 },
+                onError: (errors) => {
+                    console.log('Validation errors:', errors);
+                    setShowTransactionConfirmModal(false);
+                },
             });
         } else if (pendingTransactionAction === 'edit' && editingTransaction) {
-            putTransaction(`/transactions/${editingTransaction.id}`, {
+            // Debug: Log the form data being sent
+            console.log('Updating transaction data:', transactionData);
+            
+            // Create FormData manually to ensure proper serialization
+            const formData = new FormData();
+            formData.append('amount', transactionData.amount);
+            formData.append('description', transactionData.description);
+            formData.append('used_by', transactionData.used_by);
+            formData.append('category_id', transactionData.category_id);
+            formData.append('transaction_type', transactionData.transaction_type);
+            formData.append('date', transactionData.date);
+            formData.append('_method', 'PUT');
+            if (transactionData.receipt) {
+                formData.append('receipt', transactionData.receipt);
+            }
+            
+            router.post(`/transactions/${editingTransaction.id}`, formData, {
                 onSuccess: () => {
                     setShowTransactionConfirmModal(false);
                     setShowTransactionSuccessModal(true);
                     setPendingTransactionAction(null);
+                },
+                onError: (errors) => {
+                    console.log('Validation errors:', errors);
+                    setShowTransactionConfirmModal(false);
                 },
             });
         } else if (pendingTransactionAction === 'delete' && transactionToDelete) {
@@ -121,6 +160,10 @@ export default function Dashboard({ transactions, categories, summary, recentTra
                     setShowTransactionConfirmModal(false);
                     setShowTransactionSuccessModal(true);
                     setPendingTransactionAction(null);
+                    setTransactionToDelete(null);
+                },
+                onError: () => {
+                    setShowTransactionConfirmModal(false);
                     setTransactionToDelete(null);
                 },
             });
@@ -200,6 +243,7 @@ export default function Dashboard({ transactions, categories, summary, recentTra
     
     const openEditTransaction = (transaction: Transaction) => {
         setEditingTransaction(transaction);
+        clearErrors();
         setTransactionData({
             amount: transaction.amount,
             description: transaction.description,
@@ -207,6 +251,7 @@ export default function Dashboard({ transactions, categories, summary, recentTra
             category_id: transaction.category.id.toString(),
             transaction_type: transaction.transaction_type,
             date: transaction.date,
+            receipt: null,
         });
     };
     
@@ -233,7 +278,7 @@ export default function Dashboard({ transactions, categories, summary, recentTra
                 <div className="grid gap-4 md:grid-cols-4">
                     <Card>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium">Total Balance</CardTitle>
+                            <CardTitle className="text-sm font-medium">Remaining Balance</CardTitle>
                             <Wallet className="h-4 w-4 text-muted-foreground" />
                         </CardHeader>
                         <CardContent>
@@ -245,7 +290,7 @@ export default function Dashboard({ transactions, categories, summary, recentTra
                     
                     <Card>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium">Total Income</CardTitle>
+                            <CardTitle className="text-sm font-medium">Total Received</CardTitle>
                             <TrendingUp className="h-4 w-4 text-green-600" />
                         </CardHeader>
                         <CardContent>
@@ -363,7 +408,7 @@ export default function Dashboard({ transactions, categories, summary, recentTra
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="income">Income</SelectItem>
+                                                <SelectItem value="income">Receive</SelectItem>
                                                 <SelectItem value="expense">Expense</SelectItem>
                                             </SelectContent>
                                         </Select>
@@ -723,7 +768,7 @@ export default function Dashboard({ transactions, categories, summary, recentTra
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="income">Income</SelectItem>
+                                            <SelectItem value="income">Receive</SelectItem>
                                             <SelectItem value="expense">Expense</SelectItem>
                                         </SelectContent>
                                     </Select>

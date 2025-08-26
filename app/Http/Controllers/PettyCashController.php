@@ -23,7 +23,7 @@ class PettyCashController extends Controller
             ->orderBy('created_at', 'desc')
             ->get();
             
-        $categories = PettyCashCategory::all();
+        $categories = PettyCashCategory::forUser($user->id)->get();
         
         $totalIncome = PettyCashTransaction::forUser($user->id)
             ->income()
@@ -63,7 +63,7 @@ class PettyCashController extends Controller
             ->orderBy('created_at', 'desc')
             ->get();
             
-        $categories = PettyCashCategory::all();
+        $categories = PettyCashCategory::forUser($user->id)->get();
         
         return Inertia::render('reports', [
             'transactions' => $transactions,
@@ -154,6 +154,8 @@ class PettyCashController extends Controller
             'color' => 'required|string|regex:/^#[0-9A-Fa-f]{6}$/',
         ]);
         
+        $validated['user_id'] = Auth::id();
+        
         PettyCashCategory::create($validated);
         
         return Redirect::back()->with('success', 'Category created successfully!');
@@ -161,6 +163,11 @@ class PettyCashController extends Controller
     
     public function updateCategory(Request $request, PettyCashCategory $category)
     {
+        // Ensure user can only update their own categories
+        if ($category->user_id !== Auth::id()) {
+            abort(403);
+        }
+        
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'type' => 'required|in:income,expense',
@@ -174,8 +181,13 @@ class PettyCashController extends Controller
     
     public function destroyCategory(PettyCashCategory $category)
     {
-        // Check if category has transactions
-        if ($category->transactions()->count() > 0) {
+        // Ensure user can only delete their own categories
+        if ($category->user_id !== Auth::id()) {
+            abort(403);
+        }
+        
+        // Check if category has transactions belonging to this user
+        if ($category->transactions()->forUser(Auth::id())->count() > 0) {
             return Redirect::back()->with('error', 'Cannot delete category with existing transactions.');
         }
         

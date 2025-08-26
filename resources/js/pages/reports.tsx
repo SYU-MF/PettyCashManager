@@ -35,7 +35,7 @@ interface ReportsProps {
 
 export default function Reports({ transactions, categories }: ReportsProps) {
     const [activeTab, setActiveTab] = useState('daily');
-    const [selectedPeriod, setSelectedPeriod] = useState('7');
+    const [selectedPeriod, setSelectedPeriod] = useState('3');
     const [exportStartDate, setExportStartDate] = useState('');
     const [exportEndDate, setExportEndDate] = useState('');
 
@@ -57,11 +57,33 @@ export default function Reports({ transactions, categories }: ReportsProps) {
     // Calculate daily data
     const dailyData = useMemo(() => {
         const days = parseInt(selectedPeriod);
-        const endDate = new Date();
-        const startDate = new Date();
+        
+        // Use the latest transaction date as the end date instead of today
+        const latestTransactionDate = transactions.length > 0 
+            ? new Date(Math.max(...transactions.map(t => new Date(t.date).getTime())))
+            : new Date();
+        
+        const endDate = new Date(latestTransactionDate);
+        const startDate = new Date(endDate);
         startDate.setDate(endDate.getDate() - days + 1);
 
+        // Calculate starting balance from all transactions before the start date
+        const startingBalance = transactions
+            .filter(t => {
+                const transactionDate = new Date(t.date);
+                return transactionDate < startDate;
+            })
+            .reduce((balance, t) => {
+                if (t.transaction_type === 'income') {
+                    return balance + parseFloat(t.amount);
+                } else {
+                    return balance - parseFloat(t.amount);
+                }
+            }, 0);
+
         const dailyStats = [];
+        let runningBalance = startingBalance;
+        
         for (let i = 0; i < days; i++) {
             const currentDate = new Date(startDate);
             currentDate.setDate(startDate.getDate() + i);
@@ -80,17 +102,21 @@ export default function Reports({ transactions, categories }: ReportsProps) {
                 .filter(t => t.transaction_type === 'expense')
                 .reduce((sum, t) => sum + parseFloat(t.amount), 0);
 
+            const dailyNet = income - expenses;
+            runningBalance += dailyNet;
+
             dailyStats.push({
                 date: dateStr,
                 formattedDate: formatDate(dateStr),
                 income,
                 expenses,
-                net: income - expenses,
+                net: dailyNet,
+                runningBalance: runningBalance,
                 transactionCount: dayTransactions.length
             });
         }
 
-        return dailyStats.filter(day => day.transactionCount > 0);
+        return dailyStats;
     }, [transactions, selectedPeriod]);
 
     // Calculate weekly data
@@ -177,9 +203,19 @@ export default function Reports({ transactions, categories }: ReportsProps) {
                         <div key={index} className="space-y-2">
                             <div className="flex justify-between text-sm">
                                 <span className="font-medium">{label}</span>
-                                <span className="text-muted-foreground">
-                                    Net: {formatCurrency(item.net.toString())}
-                                </span>
+                                <div className="text-right">
+                                    {type === 'daily' && item.runningBalance !== undefined ? (
+                                        <div className={`font-semibold ${
+                                            item.runningBalance >= 0 ? 'text-green-600' : 'text-red-600'
+                                        }`}>
+                                            Ending Balance: {formatCurrency(item.runningBalance.toString())}
+                                        </div>
+                                    ) : (
+                                        <span className="text-muted-foreground">
+                                            Net: {formatCurrency(item.net.toString())}
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                             <div className="space-y-1">
                                 <div className="flex items-center space-x-2">
@@ -304,24 +340,24 @@ export default function Reports({ transactions, categories }: ReportsProps) {
         
         if (activeTab === 'daily' && dailyData.length > 0) {
             tableContent = `
-                <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                <table>
                     <thead>
-                        <tr style="background-color: #f3f4f6;">
-                            <th style="border: 1px solid #d1d5db; padding: 8px; text-align: left;">Date</th>
-                            <th style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">Income</th>
-                            <th style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">Expenses</th>
-                            <th style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">Net</th>
-                            <th style="border: 1px solid #d1d5db; padding: 8px; text-align: center;">Transactions</th>
+                        <tr>
+                            <th>Date</th>
+                            <th class="text-right">Income</th>
+                            <th class="text-right">Expenses</th>
+                            <th class="text-right">Ending Balance</th>
+                            <th class="text-center">Transactions</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${dailyData.map(day => `
                             <tr>
-                                <td style="border: 1px solid #d1d5db; padding: 8px;">${day.formattedDate}</td>
-                                <td style="border: 1px solid #d1d5db; padding: 8px; text-align: right; color: #059669;">${formatCurrency(day.income.toString())}</td>
-                                <td style="border: 1px solid #d1d5db; padding: 8px; text-align: right; color: #dc2626;">${formatCurrency(day.expenses.toString())}</td>
-                                <td style="border: 1px solid #d1d5db; padding: 8px; text-align: right; color: ${day.net >= 0 ? '#059669' : '#dc2626'};">${formatCurrency(day.net.toString())}</td>
-                                <td style="border: 1px solid #d1d5db; padding: 8px; text-align: center;">${day.transactionCount}</td>
+                                <td class="font-bold">${day.formattedDate}</td>
+                                <td class="text-right" style="color: #38a169; font-weight: 600;">${formatCurrency(day.income.toString())}</td>
+                                <td class="text-right" style="color: #e53e3e; font-weight: 600;">${formatCurrency(day.expenses.toString())}</td>
+                                <td class="text-right font-bold" style="color: ${day.runningBalance >= 0 ? '#38a169' : '#e53e3e'};">${formatCurrency(day.runningBalance.toString())}</td>
+                                <td class="text-center">${day.transactionCount}</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -329,26 +365,26 @@ export default function Reports({ transactions, categories }: ReportsProps) {
             `;
         } else if (activeTab === 'weekly' && weeklyData.length > 0) {
             tableContent = `
-                <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                <table>
                     <thead>
-                        <tr style="background-color: #f3f4f6;">
-                            <th style="border: 1px solid #d1d5db; padding: 8px; text-align: left;">Week</th>
-                            <th style="border: 1px solid #d1d5db; padding: 8px; text-align: left;">Period</th>
-                            <th style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">Income</th>
-                            <th style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">Expenses</th>
-                            <th style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">Net</th>
-                            <th style="border: 1px solid #d1d5db; padding: 8px; text-align: center;">Transactions</th>
+                        <tr>
+                            <th>Week</th>
+                            <th>Period</th>
+                            <th class="text-right">Income</th>
+                            <th class="text-right">Expenses</th>
+                            <th class="text-right">Net</th>
+                            <th class="text-center">Transactions</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${weeklyData.map(week => `
                             <tr>
-                                <td style="border: 1px solid #d1d5db; padding: 8px;">${week.weekLabel}</td>
-                                <td style="border: 1px solid #d1d5db; padding: 8px;">${formatDate(week.startDate)} - ${formatDate(week.endDate)}</td>
-                                <td style="border: 1px solid #d1d5db; padding: 8px; text-align: right; color: #059669;">${formatCurrency(week.income.toString())}</td>
-                                <td style="border: 1px solid #d1d5db; padding: 8px; text-align: right; color: #dc2626;">${formatCurrency(week.expenses.toString())}</td>
-                                <td style="border: 1px solid #d1d5db; padding: 8px; text-align: right; color: ${week.net >= 0 ? '#059669' : '#dc2626'};">${formatCurrency(week.net.toString())}</td>
-                                <td style="border: 1px solid #d1d5db; padding: 8px; text-align: center;">${week.transactionCount}</td>
+                                <td class="font-bold">${week.weekLabel}</td>
+                                <td>${formatDate(week.startDate)} - ${formatDate(week.endDate)}</td>
+                                <td class="text-right" style="color: #38a169; font-weight: 600;">${formatCurrency(week.income.toString())}</td>
+                                <td class="text-right" style="color: #e53e3e; font-weight: 600;">${formatCurrency(week.expenses.toString())}</td>
+                                <td class="text-right font-bold" style="color: ${week.net >= 0 ? '#38a169' : '#e53e3e'};">${formatCurrency(week.net.toString())}</td>
+                                <td class="text-center">${week.transactionCount}</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -428,28 +464,201 @@ export default function Reports({ transactions, categories }: ReportsProps) {
             <!DOCTYPE html>
             <html>
             <head>
-                <title>Petty Cash Manager - ${reportType} Report</title>
+                <meta charset="utf-8">
+                <title>Petty Cash Report - ${reportType}</title>
                 <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    .header { text-align: center; margin-bottom: 30px; }
-                    .summary { background-color: #f9fafb; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-                    .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
-                    .summary-item { text-align: center; }
-                    .summary-label { font-size: 14px; color: #6b7280; }
-                    .summary-value { font-size: 18px; font-weight: bold; }
-                    .income { color: #059669; }
-                    .expense { color: #dc2626; }
-                    .net { color: #2563eb; }
-                    @media print {
-                        body { margin: 0; }
+                    body {
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        margin: 0;
+                        padding: 15px;
+                        color: #2d3748;
+                        line-height: 1.4;
+                        background: #ffffff;
+                        font-size: 12px;
+                    }
+                    .header {
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        margin-bottom: 25px;
+                        padding: 15px 0;
+                        border-bottom: 2px solid #3182ce;
+                    }
+                    .logo-section {
+                        display: flex;
+                        align-items: center;
+                        gap: 15px;
+                    }
+                    .logo {
+                        width: 100px;
+                        height: 100px;
+                        object-fit: contain;
+                    }
+                    .company-info {
+                        text-align: left;
+                    }
+                    .company-name {
+                        font-size: 18px;
+                        font-weight: bold;
+                        color: #2d3748;
+                        margin: 0;
+                    }
+                    .report-info {
+                        text-align: right;
+                    }
+                    .report-title {
+                        font-size: 22px;
+                        font-weight: bold;
+                        color: #3182ce;
+                        margin: 0;
+                    }
+                    .report-subtitle {
+                        font-size: 14px;
+                        color: #4a5568;
+                        margin: 3px 0;
+                    }
+                    .report-date {
+                        font-size: 11px;
+                        color: #718096;
+                        margin: 0;
+                    }
+                    .summary-grid {
+                         display: grid;
+                         grid-template-columns: repeat(3, 1fr);
+                         gap: 15px;
+                         margin-bottom: 25px;
+                     }
+                    .summary-item {
+                        text-align: center;
+                        padding: 15px 12px;
+                        background: white;
+                        border: 1px solid #e2e8f0;
+                        border-radius: 8px;
+                        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+                    }
+                    .summary-label {
+                        font-size: 11px;
+                        color: #718096;
+                        margin-bottom: 5px;
+                        font-weight: 500;
+                        text-transform: uppercase;
+                        letter-spacing: 0.3px;
+                    }
+                    .summary-value {
+                        font-size: 16px;
+                        font-weight: bold;
+                        margin: 0;
+                    }
+                    .income { color: #38a169; }
+                     .expense { color: #e53e3e; }
+                     .net { color: #3182ce; }
+                     .table-container {
+                         background: white;
+                         border-radius: 8px;
+                         overflow: hidden;
+                         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                         margin-top: 20px;
+                     }
+                     .table-header {
+                         background: #3182ce;
+                         color: white;
+                         padding: 10px 15px;
+                         font-size: 14px;
+                         font-weight: bold;
+                     }
+                     table {
+                         width: 100%;
+                         border-collapse: collapse;
+                         margin: 0;
+                     }
+                     th {
+                         background: #edf2f7;
+                         color: #2d3748;
+                         font-weight: 600;
+                         padding: 8px 6px;
+                         text-align: left;
+                         border-bottom: 1px solid #cbd5e0;
+                         font-size: 11px;
+                         text-transform: uppercase;
+                         letter-spacing: 0.3px;
+                     }
+                     td {
+                         padding: 6px;
+                         border-bottom: 1px solid #e2e8f0;
+                         font-size: 11px;
+                     }
+                     tr:nth-child(even) {
+                         background: #f7fafc;
+                     }
+                     tr:hover {
+                         background: #edf2f7;
+                     }
+                     .text-right {
+                         text-align: right;
+                     }
+                     .text-center {
+                         text-align: center;
+                     }
+                     .font-bold {
+                         font-weight: bold;
+                     }
+                     @media print {
+                        body { 
+                            margin: 0;
+                            padding: 10px;
+                            font-size: 10px;
+                        }
                         .no-print { display: none; }
+                        .header {
+                            margin-bottom: 15px;
+                            padding: 10px 0;
+                        }
+                        .summary-grid {
+                             margin-bottom: 15px;
+                             gap: 10px;
+                         }
+                        .summary-item {
+                             box-shadow: none;
+                             border: 1px solid #cbd5e0;
+                             padding: 10px 8px;
+                         }
+                         .table-container {
+                             box-shadow: none;
+                             margin-top: 15px;
+                         }
+                         .table-header {
+                             padding: 8px 12px;
+                             font-size: 12px;
+                         }
+                         th {
+                             padding: 6px 4px;
+                             font-size: 9px;
+                         }
+                         td {
+                             padding: 4px;
+                             font-size: 9px;
+                         }
                     }
                 </style>
             </head>
             <body>
                 <div class="header">
-                    <h2>${reportType} Report${reportPeriod}</h2>
-                    <p>Generated on: ${currentDate}</p>
+                    <div class="logo-section">
+                        <img src="/img/syu bussiness co.png" alt="Company Logo" class="logo">
+                        <div class="company-info">
+                            <h1 class="company-name">SYU Business Co.</h1>
+                        </div>
+                    </div>
+                    <div class="report-info">
+                        <h1 class="report-title">Petty Cash Report</h1>
+                        <h2 class="report-subtitle">${reportType}${reportPeriod}</h2>
+                        <p class="report-date">Generated on ${new Date().toLocaleDateString('en-US', { 
+                            weekday: 'long', 
+                            year: 'numeric', 
+                            month: 'long', 
+                            day: 'numeric' 
+                        })}</p>
+                    </div>
                 </div>
                 
                 <div class="summary">
@@ -470,8 +679,8 @@ export default function Reports({ transactions, categories }: ReportsProps) {
                     </div>
                 </div>
                 
-                <div>
-                    <h3>${reportType} Details</h3>
+                <div class="table-container">
+                    <div class="table-header">${reportType} Details</div>
                     ${tableContent}
                 </div>
                 
@@ -599,9 +808,10 @@ export default function Reports({ transactions, categories }: ReportsProps) {
                                     <SelectValue placeholder="Select period" />
                                 </SelectTrigger>
                                 <SelectContent>
+                                    <SelectItem value="3">Last 3 days</SelectItem>
+                                    <SelectItem value="5">Last 5 days</SelectItem>
                                     <SelectItem value="7">Last 7 days</SelectItem>
                                     <SelectItem value="14">Last 14 days</SelectItem>
-                                    <SelectItem value="30">Last 30 days</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
